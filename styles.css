@@ -15,14 +15,6 @@
   --radius: 14px;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1512; --card: #18211c; --text: #e7efe9; --muted: #9db0a5; --line: #2a3730;
-    --accent: #3fbf8a; --accent-ink: #062014; --accent-soft: #173527;
-    --warn: #f0b75c; --warn-soft: #3a2c12; --bad: #ff8a80; --bad-soft: #3d1c1a; --ok: #3fbf8a;
-    color-scheme: dark;
-  }
-}
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); }
 body {
@@ -174,3 +166,13 @@ dialog h3 { margin: 0 0 8px; }
   background: var(--text); color: var(--bg); padding: 12px 18px; border-radius: 12px; font-weight: 600;
   width: max-content; max-width: calc(100vw - 32px); text-align: center;
 }
+
+.stack-field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; margin: 10px 0; }
+.stack-field input { width: 100%; }
+input[type=password] { font: inherit; font-size: 16px; padding: 10px 12px; min-height: 48px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+.howto { margin: 8px 0; font-size: 14px; }
+.howto summary { color: var(--accent); font-weight: 600; min-height: 32px; cursor: pointer; }
+.howto ol { padding-left: 20px; margin: 6px 0; color: var(--text); }
+.howto li { margin: 4px 0; }
+a { color: var(--accent); }
+.bad-text { color: var(--bad); }

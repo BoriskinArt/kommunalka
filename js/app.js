@@ -3,8 +3,9 @@ import * as db from './db.js';
 import { parseReceipt } from './parser.js';
 import { readPdf, ocrCanvas } from './extract.js';
 import { loadImage, PhotoEditor } from './photo.js';
+import * as cloud from './cloud.js';
 
-export const APP_VERSION = '1.0.5';
+export const APP_VERSION = '1.1.0';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -259,6 +260,7 @@ async function onEditSave() {
 async function afterSave(rec) {
   await db.requestPersistence();
   await reload();
+  dataChanged();
   state.period = rec.period;
   state.photo = null;
   if (history.state?.sub) { state.leaving = true; history.back(); } else closeSub();
@@ -274,6 +276,7 @@ async function onEditDelete() {
   if (!(await confirmDlg('Удалить запись?', `${esc(aptLabel(apt))}, ${periodText(e.period)} — ${formatRub(rec.total)}. Вернуть запись можно будет только из резервной копии.`, 'Удалить', 'danger'))) return;
   await db.deleteRecord(e.aptId, e.period);
   await reload();
+  dataChanged();
   e.dirty = false;
   if (history.state?.sub) { state.leaving = true; history.back(); } else closeSub();
   toast('Запись удалена');
@@ -538,6 +541,7 @@ async function renderMore() {
   const last = await db.getMeta('lastBackup');
   $('#lastBackup').textContent = last ? `Последняя копия: ${new Date(last).toLocaleString('ru-RU')}` : 'Копия ещё не сохранялась.';
   $('#btnUndoImport').hidden = !(await db.getMeta('beforeImport'));
+  await renderCloud();
   let persisted = false;
   try { persisted = await navigator.storage?.persisted?.(); } catch { /* нет API */ }
   $('#storageInfo').textContent = persisted ? 'Браузер не удалит данные сам.' : 'При нехватке места браузер может удалить данные — сохраняйте копии.';
@@ -573,20 +577,25 @@ async function onExport() {
 
 async function onImport(file) {
   try {
-    const data = JSON.parse(await file.text());
-    const info = db.validateBackup(data);
-    const cur = state.records.size;
-    const ok = await confirmDlg('Восстановить из копии?',
-      `Сейчас в приложении <b>${nRecords(cur)}</b>, в копии — <b>${nRecords(info.records)}</b> (${plural(info.apartments, 'квартира', 'квартиры', 'квартир')}). Текущие данные <b>заменятся</b> копией.<br><br>Если что-то пойдёт не так, их можно вернуть кнопкой «Вернуть данные до восстановления».`,
-      'Заменить данные', 'danger');
-    if (!ok) return;
-    await db.importReplace(data);
-    await reload();
-    render();
-    toast('Данные восстановлены из копии');
+    await restoreData(JSON.parse(await file.text()), 'копии');
   } catch (err) {
     ask('Не удалось восстановить', esc(err.message || 'Файл не читается'), [{ label: 'Понятно', value: '' }]);
   }
+}
+
+async function restoreData(data, from) {
+  const info = db.validateBackup(data);
+  const cur = state.records.size;
+  const ok = await confirmDlg(`Восстановить из ${from}?`,
+    `Сейчас в приложении <b>${nRecords(cur)}</b>, в копии — <b>${nRecords(info.records)}</b> (${plural(info.apartments, 'квартира', 'квартиры', 'квартир')}). Текущие данные <b>заменятся</b> копией.<br><br>Если что-то пойдёт не так, их можно вернуть кнопкой «Вернуть данные до восстановления».`,
+    'Заменить данные', 'danger');
+  if (!ok) return false;
+  await db.importReplace(data);
+  await reload();
+  dataChanged();
+  render();
+  toast(`Данные восстановлены из ${from}`);
+  return true;
 }
 
 async function onUndoImport() {
@@ -595,8 +604,110 @@ async function onUndoImport() {
   if (!(await confirmDlg('Вернуть прежние данные?', `Вернутся данные, которые были до восстановления из копии (${nRecords(before.records.length)}). Текущие заменятся.`, 'Вернуть', 'danger'))) return;
   await db.importReplace(before);
   await reload();
+  dataChanged();
   render();
   toast('Прежние данные возвращены');
+}
+
+// ---------- облачная копия ----------
+
+let syncTimer = null;
+let syncing = null;
+
+/** Вызывается после любого изменения данных. */
+async function dataChanged() {
+  if (!(await cloud.getCloud())) return;
+  await cloud.markPending();
+  scheduleSync();
+}
+function scheduleSync() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => runSync(), 1200);
+}
+async function runSync({ manual = false } = {}) {
+  if (syncing) return syncing;
+  syncing = (async () => {
+    try {
+      if (!(await cloud.getCloud())) return;
+      if (manual) busy('Отправляю копию в облако…');
+      const n = await cloud.push();
+      busy(null);
+      if (manual) toast(`Копия в облаке обновлена (${nRecords(n)})`);
+    } catch (err) {
+      busy(null);
+      toast(`Облачная копия не отправлена: ${err.message}`, 5000);
+    } finally {
+      syncing = null;
+      if (state.tab === 'more' && !state.sub) renderCloud();
+    }
+  })();
+  return syncing;
+}
+
+async function renderCloud() {
+  const cfg = await cloud.getCloud();
+  $('#cloudOff').hidden = Boolean(cfg);
+  $('#cloudOn').hidden = !cfg;
+  if (!cfg) return;
+  const when = cfg.lastPush ? new Date(cfg.lastPush).toLocaleString('ru-RU') : 'ещё не отправлялась';
+  $('#cloudStatus').innerHTML = `Репозиторий <b>${esc(cfg.repo)}</b>.<br>Последняя отправка: ${esc(when)}${cfg.pending && !cfg.lastError ? ' (есть неотправленные изменения)' : ''}.`;
+  $('#cloudError').hidden = !cfg.lastError;
+  $('#cloudError').textContent = cfg.lastError ? `Ошибка: ${cfg.lastError}` : '';
+}
+
+async function onCloudConnect() {
+  const repo = $('#cloudRepo').value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '').replace(/\/$/, '');
+  const token = $('#cloudToken').value.trim();
+  busy('Проверяю доступ к GitHub…');
+  let info;
+  let remote;
+  try {
+    info = await cloud.check(repo, token);
+    remote = await cloud.pull({ repo, token });
+  } finally { busy(null); }
+  if (!info.private) {
+    const ok = await confirmDlg('Репозиторий публичный',
+      'Копию в нём сможет прочитать кто угодно. Лучше сделайте репозиторий приватным (Settings → Danger Zone → Change visibility). Всё равно подключить?',
+      'Подключить', 'danger');
+    if (!ok) return;
+  }
+  await cloud.saveConfig(repo, token);
+  $('#cloudToken').value = '';
+  if (remote) {
+    db.validateBackup(remote);
+    const local = state.records.size;
+    const date = remote.exportedAt ? new Date(remote.exportedAt).toLocaleString('ru-RU') : '—';
+    const v = await ask('В облаке уже есть копия',
+      `В облаке: <b>${nRecords(remote.records.length)}</b> от ${esc(date)}.<br>На телефоне: <b>${nRecords(local)}</b>.<br><br>Какие данные оставить?`,
+      [
+        { label: 'Взять из облака', value: 'pull', cls: local ? '' : 'primary' },
+        { label: 'Отправить с телефона', value: 'push', cls: local ? 'primary' : '' },
+      ]);
+    if (v === 'pull') {
+      await db.importReplace(remote);
+      await reload();
+      render();
+      toast('Подключено. Данные взяты из облака');
+      return;
+    }
+    if (v !== 'push') { await cloud.markPending(); renderCloud(); toast('Подключено. Копия отправится при следующем изменении'); return; }
+  }
+  await runSync({ manual: true });
+  renderCloud();
+}
+
+async function onCloudPull() {
+  busy('Загружаю копию из облака…');
+  let data;
+  try { data = await cloud.pull(); } finally { busy(null); }
+  if (!data) return ask('Копии нет', 'В облаке ещё нет копии. Она появится после первой отправки.', [{ label: 'Понятно', value: '' }]);
+  await restoreData(data, 'облака');
+}
+
+async function onCloudOff() {
+  if (!(await confirmDlg('Отключить облачную копию?', 'Копия в GitHub останется, но новые изменения отправляться не будут. Токен будет удалён с телефона.', 'Отключить', 'danger'))) return;
+  await cloud.disconnect();
+  renderCloud();
 }
 
 // ---------- события ----------
@@ -669,6 +780,7 @@ function bind() {
       if (!(await confirmDlg('Удалить запись?', `${esc(aptLabel(apt))}, ${periodText(del)} — ${formatRub(rec.total)}. Вернуть запись можно будет только из резервной копии.`, 'Удалить', 'danger'))) return;
       await db.deleteRecord(state.histApt, del);
       await reload();
+      dataChanged();
       renderHistory();
       toast('Запись удалена');
     }
@@ -678,6 +790,11 @@ function bind() {
   $('#btnExport').addEventListener('click', () => onExport().catch(showError));
   $('#importFile').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) onImport(f).finally(() => { e.target.value = ''; }); });
   $('#btnUndoImport').addEventListener('click', () => onUndoImport().catch(showError));
+  $('#btnCloudConnect').addEventListener('click', () => onCloudConnect().catch(showError));
+  $('#btnCloudPush').addEventListener('click', () => runSync({ manual: true }));
+  $('#btnCloudPull').addEventListener('click', () => onCloudPull().catch(showError));
+  $('#btnCloudOff').addEventListener('click', () => onCloudOff().catch(showError));
+  window.addEventListener('online', async () => { if ((await cloud.getCloud())?.pending) scheduleSync(); });
   $('#btnAddApt').addEventListener('click', async () => {
     const n = $('#newAptNumber').value.trim();
     if (!/^[0-9]{1,5}[а-яА-Яa-zA-Z]?$/.test(n)) return toast('Введите номер квартиры');
@@ -685,6 +802,7 @@ function bind() {
       await db.addApartment(n);
       $('#newAptNumber').value = '';
       await reload();
+      dataChanged();
       renderMore();
       toast(`Квартира № ${n} добавлена`);
     } catch (err) { toast(err.message); }
@@ -697,6 +815,7 @@ function bind() {
     if (!(await confirmDlg(`Удалить ${aptLabel(apt)}?`, n ? `Вместе с квартирой удалятся <b>${nRecords(n)}</b>. Лучше сначала сохраните резервную копию.` : 'Записей у квартиры нет.', 'Удалить', 'danger'))) return;
     await db.deleteApartment(id);
     await reload();
+    dataChanged();
     renderMore();
   });
 }
@@ -721,6 +840,7 @@ async function init() {
   const periods = [...state.records.values()].map((r) => r.period).sort();
   if (periods.length && !periods.includes(state.period)) state.period = periods[periods.length - 1];
   render();
+  if ((await cloud.getCloud())?.pending) scheduleSync();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').then((reg) => {
       reg.addEventListener('updatefound', () => {

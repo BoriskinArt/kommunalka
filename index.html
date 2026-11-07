@@ -6,6 +6,7 @@
   <title>Коммуналка</title>
   <meta name="description" content="Учёт коммунальных платежей по квартирам">
   <meta name="theme-color" content="#14805a">
+  <meta name="color-scheme" content="light">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -102,14 +103,43 @@
     <!-- Ещё -->
     <section id="view-more" class="view" hidden>
       <div class="card">
-        <h2>Резервная копия</h2>
-        <p class="hint">Данные хранятся только на этом телефоне. Время от времени сохраняйте копию в файл (например, в «Загрузки» или Google Диск).</p>
+        <h2>Копия в файл</h2>
+        <p class="hint">Данные хранятся на этом телефоне. Копию можно сохранить в файл — например, в «Загрузки» или Google Диск.</p>
         <div class="actions">
           <button class="btn primary" id="btnExport">Сохранить копию</button>
           <label class="btn file-btn">Восстановить из копии<input type="file" id="importFile" accept="application/json,.json"></label>
           <button class="btn" id="btnUndoImport" hidden>Вернуть данные до восстановления</button>
         </div>
         <p class="hint" id="lastBackup"></p>
+      </div>
+      <div class="card">
+        <h2>Облачная копия</h2>
+        <div id="cloudOff">
+          <p class="hint">После каждого изменения приложение само отправляет копию в ваш приватный репозиторий на GitHub. На новом телефоне её можно восстановить.</p>
+          <details class="howto">
+            <summary>Как получить токен</summary>
+            <ol>
+              <li>Создайте приватный репозиторий: <a href="https://github.com/new" target="_blank" rel="noopener">github.com/new</a>, имя <b>kommunalka-data</b>, тип <b>Private</b>.</li>
+              <li>Откройте <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">создание токена</a>.</li>
+              <li>Expiration — выберите срок. Когда токен истечёт, приложение об этом скажет.</li>
+              <li>Repository access → <b>Only select repositories</b> → kommunalka-data.</li>
+              <li>Permissions → Repository permissions → <b>Contents: Read and write</b>.</li>
+              <li>Нажмите <b>Generate token</b>, скопируйте его и вставьте ниже.</li>
+            </ol>
+          </details>
+          <label class="stack-field">Репозиторий<input type="text" id="cloudRepo" placeholder="логин/kommunalka-data" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+          <label class="stack-field">Токен<input type="password" id="cloudToken" placeholder="github_pat_…" autocapitalize="off" autocomplete="off" spellcheck="false"></label>
+          <div class="actions"><button class="btn primary" id="btnCloudConnect">Подключить</button></div>
+        </div>
+        <div id="cloudOn" hidden>
+          <p id="cloudStatus"></p>
+          <p class="hint bad-text" id="cloudError" hidden></p>
+          <div class="actions">
+            <button class="btn" id="btnCloudPush">Отправить сейчас</button>
+            <button class="btn" id="btnCloudPull">Восстановить из облака</button>
+            <button class="btn danger" id="btnCloudOff">Отключить</button>
+          </div>
+        </div>
       </div>
       <div class="card">
         <h2>Квартиры</h2>
