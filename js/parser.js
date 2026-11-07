@@ -172,7 +172,8 @@ function mergeNumberParts(items, hMed) {
 export function detectPeriod(fullNorm) {
   const found = [];
   for (const [stem, month] of MONTHS) {
-    const re = new RegExp(`(^|[^а-я0-9])(за\\s+)?${stem}[а-я]*\\.?\\s*(20\\d\\d)`, 'g');
+    // «за октябрь 2026», «ЗА ОКТЯБРЬ 2026г.», «за ОКТЯБРЬ - 2026»
+    const re = new RegExp(`(^|[^а-я0-9])(за\\s+)?${stem}[а-я]*\\.?\\s*-?\\s*(20\\d\\d)`, 'g');
     let m;
     while ((m = re.exec(fullNorm))) {
       const before = fullNorm.slice(Math.max(0, m.index - 4), m.index + m[1].length);
@@ -195,6 +196,9 @@ export function detectPeriod(fullNorm) {
 }
 
 export function detectApartment(fullNorm) {
+  // Явно подписанный адрес помещения плательщика важнее остальных (в шапке бывает и адрес ТСН/УК).
+  const own = /адрес\s+(?:жилого\s+)?помещения[^\n]*?(?:кв\.?|квартира)\s*(?:№\s*)?(\d{1,4})(?![\d.,]*\d)/.exec(fullNorm);
+  if (own) return { number: String(Number(own[1])) };
   const nums = new Set();
   const re = /(?:^|[^а-я])(?:кв\.?|квартира|кв-ра)\s*(?:№\s*)?(\d{1,4})(?![\d.,]*\d)(?!\s*м)/g;
   let m;
@@ -268,19 +272,27 @@ function decimals(str) {
 }
 const toNum = (str) => Number(str.replace(/[\s ]/g, '').replace(',', '.'));
 
+// Объём со сноской «0.5841 (1)» — сноска указывает способ расчёта, на число не влияет.
+const stripNote = (s) => s.replace(/\s*\(\d\)\s*$/, '');
+
 /** Проверка: объём × тариф ≈ начислено. */
 function crossCheck(numsLeft, cents) {
   if (numsLeft.length < 2 || cents == null) return null;
-  const vol = numsLeft[0];
-  const tar = numsLeft[numsLeft.length - 1];
-  if (!isNumeric(vol.str) || !isNumeric(tar.str)) return null;
-  const v = toNum(vol.str);
-  const t = toNum(tar.str);
+  const volStr = stripNote(numsLeft[0].str);
+  const tarStr = stripNote(numsLeft[numsLeft.length - 1].str);
+  if (!isNumeric(volStr) || !isNumeric(tarStr)) return null;
+  const v = toNum(volStr);
+  const t = toNum(tarStr);
   if (!Number.isFinite(v) || !Number.isFinite(t) || v <= 0 || t <= 0) return null;
   const expected = v * t;
-  const tol = 0.5 * 10 ** -decimals(vol.str) * t + 0.5 * 10 ** -decimals(tar.str) * v + 0.011;
-  return { ok: Math.abs(expected - cents / 100) <= tol, expected, vol: vol.str, tariff: tar.str };
+  const tol = 0.5 * 10 ** -decimals(volStr) * t + 0.5 * 10 ** -decimals(tarStr) * v + 0.011;
+  return { ok: Math.abs(expected - cents / 100) <= tol, expected, vol: volStr, tariff: tarStr };
 }
+
+// Заголовки разделов внутри таблицы. Раздел общего имущества: строки в нём — это ОДН,
+// даже если в названии нет пометки («Холодная вода», «Сточные воды»).
+const SECTION_COMMON = /общего\s+имущества|общедомов[а-я]*\s+нужд|на\s+одн(?![а-я])/;
+const SECTION_OTHER = /^(коммунальные\s+услуги|дополнительные\s+услуги|прочие\s+услуги|иные\s+услуги|жилищные\s+услуги|начисления\s+за\s)/;
 
 function parseTable(pages) {
   const rows = [];
@@ -289,13 +301,14 @@ function parseTable(pages) {
     const { lines, hMed } = groupLines(page.items);
     let cols = null;
     let ended = false;
+    let common = false;
     const dataLines = [];
     const nameOnly = [];
     for (let i = 0; i < lines.length; i++) {
       const ln = lines[i];
       if (isAccruedHeader(ln.norm)) {
         const h = findHeader(lines, i);
-        if (h) { cols = h; headersFound++; ended = false; continue; }
+        if (h) { cols = h; headersFound++; ended = false; common = false; continue; }
       }
       if (!cols || ended) continue;
       if (cols.lineIdxs.has(i)) continue;
@@ -306,12 +319,16 @@ function parseTable(pages) {
         const r = right(it);
         return r > cols.accX && r <= cols.nextX + hMed * 0.3 && /\d/.test(it.str);
       });
-      const firstNumX = Math.min(...ln.items.filter((it) => isNumeric(it.str)).map((it) => it.x), Infinity);
+      if (!accItems.length && !ln.items.some((it) => isNumeric(stripNote(it.str)))) {
+        if (SECTION_COMMON.test(ln.norm)) { common = true; continue; }
+        if (SECTION_OTHER.test(ln.norm)) { common = false; continue; }
+      }
+      const firstNumX = Math.min(...ln.items.filter((it) => isNumeric(stripNote(it.str))).map((it) => it.x), Infinity);
       const boundary = cols.nameBoundary ?? firstNumX;
       const nameParts = ln.items.filter((it) => it.x < boundary && /[a-zа-яё]/i.test(it.str) && right(it) <= Math.min(boundary, firstNumX) + hMed);
       if (accItems.length) {
-        const left = ln.items.filter((it) => right(it) <= cols.accX && it.x >= boundary - hMed && isNumeric(it.str));
-        dataLines.push({ cy: ln.cy, nameParts: nameParts.map((p) => p.str), accItems, left, text: ln.text, page: pages.indexOf(page) + 1 });
+        const left = ln.items.filter((it) => right(it) <= cols.accX && it.x >= boundary - hMed && isNumeric(stripNote(it.str)));
+        dataLines.push({ cy: ln.cy, nameParts: nameParts.map((p) => p.str), accItems, left, text: ln.text, page: pages.indexOf(page) + 1, common });
       } else if (nameParts.length && !ln.items.some((it) => isNumeric(it.str) && it.x >= boundary)) {
         nameOnly.push({ cy: ln.cy, str: nameParts.map((p) => p.str).join(' '), text: ln.text });
       }
@@ -335,7 +352,7 @@ function parseTable(pages) {
       const name = parts.map((p) => p.s).join(' ').trim();
       const sourceLines = [...(d.attached || []).map((a) => ({ cy: a.cy, t: a.text })), { cy: d.cy, t: d.text }]
         .sort((a, b) => a.cy - b.cy).map((x) => x.t);
-      rows.push({ name, accItems: d.accItems, left: d.left, source: sourceLines.join(' ⏎ '), page: d.page });
+      rows.push({ name, accItems: d.accItems, left: d.left, source: sourceLines.join(' ⏎ '), page: d.page, common: d.common });
     }
   }
   return { rows, headersFound };
@@ -398,10 +415,12 @@ export function parseReceipt(pages, { knownApartments = [], accountMap = {} } = 
   const { rows, headersFound } = parseTable(pages);
   let mode = 'table';
   const ambiguousRows = [];
+  const commonRows = []; // строки раздела общего имущества (не учитываются)
 
   if (headersFound) {
     for (const row of rows) {
       const cls = classifyService(row.name, { electricityContext });
+      if (row.common) { if (cls.key) commonRows.push({ ...row, key: cls.key }); continue; }
       if (cls.ambiguous) { ambiguousRows.push({ ...row, reason: cls.reason }); continue; }
       if (!cls.key) continue;
       const svc = services[cls.key];
@@ -493,10 +512,16 @@ export function parseReceipt(pages, { knownApartments = [], accountMap = {} } = 
       const svc = services[key];
       if (svc.status !== 'absent') continue;
       const amb = ambiguousRows.find((r) => relatedToKey(r.reason, key));
+      const com = commonRows.find((r) => r.key === key);
       if (amb) {
         svc.status = 'unreadable';
         svc.notes.push(`Возможно, это строка «${amb.name}» (${amb.reason}). Впишите сумму сами.`);
         svc.source = amb.source;
+      } else if (com) {
+        // Нашлась только строка из раздела общего имущества — 0 сами не ставим.
+        svc.status = 'unreadable';
+        svc.notes.push(`Есть только строка «${com.name}» из раздела общего имущества, она не учитывается. Если услуги нет, впишите 0.`);
+        svc.source = com.source;
       } else {
         svc.cents = 0;
         svc.notes.push('Поставлен 0.');

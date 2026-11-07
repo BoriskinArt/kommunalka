@@ -5,7 +5,7 @@ import { readPdf, ocrCanvas } from './extract.js';
 import { loadImage, PhotoEditor } from './photo.js';
 import * as cloud from './cloud.js';
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.1.1';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -394,7 +394,7 @@ async function showReview(pages, ctx) {
   }
   $('#revFile').textContent = `Файл: ${ctx.fileNames}`;
   $('#revMonth').value = result.period || '';
-  $('#revAptHow').textContent = result.apartmentHow ? `— определена ${result.apartmentHow}` : '';
+  $('#revAptHow').textContent = result.apartmentHow ? `— ${result.apartmentHow}` : '';
   $('#revApts').innerHTML = chipsHtml(state.rev.aptId, result.apartment);
   const w = result.warnings;
   $('#revWarnings').innerHTML = w.length ? `<div class="warn-box"><b>Обратите внимание</b><ul>${w.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : '';

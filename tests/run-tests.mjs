@@ -94,6 +94,48 @@ await test('«Горячее водоснабжение» без уточнен�
   assert.ok(r.ambiguous);
 });
 
+// ---------- Раздел общего имущества (синтетическая таблица) ----------
+console.log('Раздел общего имущества');
+function table(rows) {
+  // rows: [name, volume, tariff, accrued] | ['#', заголовок раздела]
+  const items = [
+    { str: 'Виды услуг', x: 20, y: 10, w: 40, h: 7 }, { str: 'Объем', x: 160, y: 10, w: 20, h: 7 },
+    { str: 'Тариф', x: 250, y: 10, w: 25, h: 7 }, { str: 'Начислено', x: 300, y: 10, w: 35, h: 7 },
+    { str: 'по тарифу', x: 300, y: 17, w: 35, h: 7 }, { str: 'Перерасчеты', x: 360, y: 10, w: 45, h: 7 },
+    { str: 'кв. 76 за октябрь 2026 электроэнергия', x: 20, y: 0, w: 100, h: 7 },
+  ];
+  rows.forEach((r, i) => {
+    const y = 40 + i * 8;
+    if (r[0] === '#') items.push({ str: r[1], x: 20, y, w: 300, h: 7 });
+    else items.push({ str: r[0], x: 20, y, w: 100, h: 7 }, { str: r[1], x: 165, y, w: 15, h: 7 },
+      { str: r[2], x: 255, y, w: 20, h: 7 }, { str: r[3], x: 310, y, w: 22, h: 7 }, { str: '0.00', x: 380, y, w: 15, h: 7 });
+  });
+  return [{ items, source: 'pdf' }];
+}
+const APT76 = [{ id: 'apt-76', number: '76' }];
+await test('Строки раздела общего имущества без пометки ОДН не учитываются', () => {
+  const r = parseReceipt(table([
+    ['#', 'в том числе коммунальные ресурсы, потребляемые при содержании общего имущества в многоквартирном доме:'],
+    ['Холодная вода', '0.43', '37.73', '16.33'], ['Сточные воды', '0.52', '27.82', '14.60'],
+    ['#', 'Коммунальные услуги'],
+    ['Холодное водоснабжение', '9', '37.73', '339.57'], ['Водоотведение', '18', '27.82', '500.76'],
+  ]), { knownApartments: APT76 });
+  assert.equal(r.services.cold.cents, 33957);
+  assert.equal(r.services.drain.cents, 50076);
+  assert.equal(r.services.cold.status, 'ok');
+});
+await test('Если есть только строка общего имущества — 0 сам не ставится', () => {
+  const r = parseReceipt(table([
+    ['#', 'в том числе коммунальные ресурсы, потребляемые при содержании общего имущества:'],
+    ['Сточные воды', '0.52', '27.82', '14.60'],
+    ['#', 'Коммунальные услуги'],
+    ['Холодное водоснабжение', '9', '37.73', '339.57'],
+  ]), { knownApartments: APT76 });
+  assert.equal(r.services.drain.cents, null);
+  assert.equal(r.services.drain.status, 'unreadable');
+  assert.equal(r.services.hotCarrier.cents, 0); // услуги нет вовсе — 0
+});
+
 // ---------- Реальные PDF ----------
 const pdfjsPath = process.argv[2];
 const APTS = [{ id: 'apt-76', number: '76' }, { id: 'apt-211', number: '211' }, { id: 'apt-231', number: '231' }, { id: 'apt-5', number: '5' }];
@@ -102,6 +144,8 @@ const FIXTURES = [
     expect: { cold: 44521, hotCarrier: 30939, hotEnergy: 183636, elDay: 136746, elNight: 15588, drain: 55640 } },
   { file: 'antey-76-2026-08.pdf', apt: 'apt-76', period: '2026-08',
     expect: { cold: 35486, hotCarrier: 19356, hotEnergy: 122339, elDay: 147760, elNight: 32646, drain: 40409 } },
+  { file: 'altair-76-2026-10.pdf', apt: 'apt-76', period: '2026-10',
+    expect: { cold: 33957, hotCarrier: 33957, hotEnergy: 218375, elDay: 124343, elNight: 21074, drain: 50076 } },
 ];
 if (pdfjsPath) {
   console.log('Разбор реальных квитанций (PDF)');
