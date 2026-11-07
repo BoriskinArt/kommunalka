@@ -1,0 +1,6 @@
+# Личные квитанции (ФИО, адрес, лицевой счёт) — не публиковать
+tests/fixtures/
+# Артефакты сборки
+dist/
+kommunalka-dist.zip
+.DS_Store

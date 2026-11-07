@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Коммуналка</title>
+  <meta name="description" content="Учёт коммунальных платежей по квартирам">
+  <meta name="theme-color" content="#14805a">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn back" id="btnBack" hidden aria-label="Назад">←</button>
+    <h1 id="title">Коммунальные платежи</h1>
+  </header>
+
+  <main>
+    <!-- Месяц -->
+    <section id="view-month" class="view">
+      <div class="month-nav">
+        <button class="icon-btn" data-month-step="-1" aria-label="Предыдущий месяц">‹</button>
+        <label class="month-label"><span id="monthTitle"></span><input type="month" id="monthInput" aria-label="Выбрать месяц"></label>
+        <button class="icon-btn" data-month-step="1" aria-label="Следующий месяц">›</button>
+      </div>
+      <div class="grand card accent">
+        <div>Итого за месяц<small id="grandNote"></small></div>
+        <div class="grand-sum" id="grandTotal">0,00 ₽</div>
+      </div>
+      <div id="aptCards"></div>
+      <div class="spacer"></div>
+    </section>
+
+    <!-- Ручной ввод / редактирование -->
+    <section id="view-edit" class="view" hidden>
+      <div class="card">
+        <div class="field-label">Квартира</div>
+        <div class="chips" id="editApts"></div>
+        <label class="row-field"><span>Месяц</span><input type="month" id="editMonth"></label>
+        <div id="editExisting" class="note" hidden></div>
+      </div>
+      <div class="card" id="editFields"></div>
+      <div class="card total-card">
+        <span>Итого по квартире</span><strong id="editTotal">0,00 ₽</strong>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="editSave">Сохранить начисления</button>
+        <button class="btn" id="editCancel">Отменить</button>
+        <button class="btn danger" id="editDelete" hidden>Удалить запись</button>
+      </div>
+    </section>
+
+    <!-- Фото -->
+    <section id="view-photo" class="view" hidden>
+      <p class="hint" id="photoHint">Подвиньте углы рамки к углам таблицы: лишнее обрежется, перекос выпрямится.</p>
+      <div class="photo-wrap"><canvas id="photoCanvas"></canvas></div>
+      <div class="tool-row">
+        <button class="btn small" id="rotL">↺ Повернуть</button>
+        <button class="btn small" id="rotR">↻ Повернуть</button>
+        <button class="btn small" id="frameReset">Сбросить рамку</button>
+      </div>
+      <label class="check-row"><input type="checkbox" id="contrast" checked> Усилить контраст</label>
+      <div class="tool-row" id="photoPager" hidden>
+        <button class="btn small" id="photoPrev">‹ Пред.</button>
+        <span id="photoPage"></span>
+        <button class="btn small" id="photoNext">След. ›</button>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="photoGo">Распознать</button>
+        <button class="btn" id="photoCancel">Отменить</button>
+      </div>
+    </section>
+
+    <!-- Проверка распознавания -->
+    <section id="view-review" class="view" hidden>
+      <div class="card">
+        <div class="file-name" id="revFile"></div>
+        <div class="field-label">Квартира <small id="revAptHow"></small></div>
+        <div class="chips" id="revApts"></div>
+        <label class="row-field"><span>Месяц</span><input type="month" id="revMonth"></label>
+      </div>
+      <div id="revWarnings"></div>
+      <div class="card" id="revFields"></div>
+      <div class="card total-card">
+        <span>Итого по квартире</span><strong id="revTotal">—</strong>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="revSave">Сохранить начисления</button>
+        <button class="btn" id="revRetry">Распознать заново</button>
+        <button class="btn" id="revCancel">Отменить</button>
+      </div>
+    </section>
+
+    <!-- История -->
+    <section id="view-history" class="view" hidden>
+      <div class="chips" id="histApts"></div>
+      <div id="histList"></div>
+    </section>
+
+    <!-- Ещё -->
+    <section id="view-more" class="view" hidden>
+      <div class="card">
+        <h2>Резервная копия</h2>
+        <p class="hint">Данные хранятся только на этом телефоне. Время от времени сохраняйте копию в файл (например, в «Загрузки» или Google Диск).</p>
+        <div class="actions">
+          <button class="btn primary" id="btnExport">Сохранить копию</button>
+          <label class="btn file-btn">Восстановить из копии<input type="file" id="importFile" accept="application/json,.json"></label>
+          <button class="btn" id="btnUndoImport" hidden>Вернуть данные до восстановления</button>
+        </div>
+        <p class="hint" id="lastBackup"></p>
+      </div>
+      <div class="card">
+        <h2>Квартиры</h2>
+        <div id="aptManage"></div>
+        <div class="add-apt">
+          <input type="text" id="newAptNumber" inputmode="numeric" placeholder="Номер квартиры" maxlength="6">
+          <button class="btn" id="btnAddApt">Добавить</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>О приложении</h2>
+        <p class="hint">Учитываются шесть услуг: холодная вода, горячая вода (носитель и энергия), электроэнергия день и ночь, водоотведение. ОДН, СОИ, содержание, отопление, ТКО, капремонт и прочее не учитываются. Суммы берутся из столбца «Начислено по тарифу».</p>
+        <p class="hint" id="storageInfo"></p>
+        <p class="hint">Версия <span id="appVersion"></span></p>
+      </div>
+    </section>
+  </main>
+
+  <div class="fab-bar" id="fabBar">
+    <label class="btn primary big file-btn">Загрузить квитанцию
+      <input type="file" id="fileInput" accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.pdf,.jpg,.jpeg,.png,.webp,.heic,.heif" multiple>
+    </label>
+    <button class="btn big" id="btnManual">Ввести вручную</button>
+  </div>
+
+  <nav class="tabbar" id="tabbar">
+    <button data-tab="month" class="active">Месяц</button>
+    <button data-tab="history">История</button>
+    <button data-tab="more">Ещё</button>
+  </nav>
+
+  <div class="busy" id="busy" hidden><div class="busy-box"><div class="spinner"></div><div id="busyText">Обработка…</div></div></div>
+  <dialog id="dlg"><form method="dialog"><h3 id="dlgTitle"></h3><div id="dlgText"></div><div class="dlg-actions" id="dlgActions"></div></form></dialog>
+  <div class="toast" id="toast" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
