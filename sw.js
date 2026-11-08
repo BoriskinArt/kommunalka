@@ -1,11 +1,11 @@
 // Service worker: офлайн-работа. Данные пользователя хранятся в IndexedDB и при обновлении не затрагиваются.
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 const SHELL = `shell-${VERSION}`;
 const OCR = 'ocr-v5.1.1';
 
 const SHELL_FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/db.js', 'js/money.js', 'js/parser.js', 'js/extract.js', 'js/photo.js', 'js/cloud.js',
+  'js/app.js', 'js/db.js', 'js/money.js', 'js/parser.js', 'js/extract.js', 'js/photo.js', 'js/cloud.js', 'js/kirova.js',
   'icons/icon-192.png', 'icons/icon-512.png',
   'vendor/pdfjs/pdf.min.mjs', 'vendor/pdfjs/pdf.worker.min.mjs',
 ];

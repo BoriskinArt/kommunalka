@@ -100,6 +100,29 @@
       <div id="histList"></div>
     </section>
 
+    <!-- Кирова, 40 -->
+    <section id="view-kirova" class="view" hidden>
+      <div class="month-nav">
+        <button class="icon-btn" data-kstep="-1" aria-label="Предыдущий месяц">‹</button>
+        <label class="month-label"><span id="kMonthTitle"></span><input type="month" id="kMonthInput" aria-label="Выбрать месяц"></label>
+        <button class="icon-btn" data-kstep="1" aria-label="Следующий месяц">›</button>
+      </div>
+      <div class="card" id="kFields"></div>
+      <div class="card k-totals">
+        <div class="k-line"><span>Итого</span><strong id="kTotal">0,00 ₽</strong></div>
+        <div class="k-line main"><span>Итого + 6%</span><strong id="kTotal6">0,00 ₽</strong></div>
+      </div>
+      <label class="card k-paid" id="kPaidRow">
+        <input type="checkbox" id="kPaid">
+        <span>Оплачено<small id="kPaidAt"></small></span>
+      </label>
+      <p class="hint k-note">Сохраняется само. В итоги квартир не входит.</p>
+      <div class="card">
+        <h2>По месяцам</h2>
+        <div id="kHist"></div>
+      </div>
+    </section>
+
     <!-- Ещё -->
     <section id="view-more" class="view" hidden>
       <div class="card">
@@ -168,6 +191,7 @@
   <nav class="tabbar" id="tabbar">
     <button data-tab="month" class="active">Месяц</button>
     <button data-tab="history">История</button>
+    <button data-tab="kirova">Кирова 40</button>
     <button data-tab="more">Ещё</button>
   </nav>
 

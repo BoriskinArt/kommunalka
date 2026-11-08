@@ -4,8 +4,9 @@ import { parseReceipt } from './parser.js';
 import { readPdf, ocrCanvas } from './extract.js';
 import { loadImage, PhotoEditor } from './photo.js';
 import * as cloud from './cloud.js';
+import { initKirova, renderKirova, reloadKirova, flush as flushKirova } from './kirova.js';
 
-export const APP_VERSION = '1.1.1';
+export const APP_VERSION = '1.2.0';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -66,6 +67,7 @@ const confirmDlg = (title, html, okLabel, cls = 'primary') =>
   ask(title, html, [{ label: okLabel, value: 'ok', cls }, { label: 'Отмена', value: '' }]).then((v) => v === 'ok');
 
 async function reload() {
+  await reloadKirova();
   state.apartments = await db.listApartments();
   const recs = await db.listRecords();
   state.records = new Map(recs.map((r) => [r.key, r]));
@@ -75,19 +77,20 @@ const getRec = (aptId, period) => state.records.get(db.recordKey(aptId, period))
 
 // ---------- навигация ----------
 
-const TITLES = { month: 'Коммунальные платежи', history: 'История', more: 'Ещё', edit: 'Начисления', review: 'Проверка квитанции', photo: 'Подготовка фото' };
+const TITLES = { month: 'Коммунальные платежи', history: 'История', kirova: 'Кирова, 40', more: 'Ещё', edit: 'Начисления', review: 'Проверка квитанции', photo: 'Подготовка фото' };
 
 function render() {
   const view = state.sub || state.tab;
-  for (const v of ['month', 'history', 'more', 'edit', 'review', 'photo']) $(`#view-${v}`).hidden = v !== view;
+  for (const v of ['month', 'history', 'kirova', 'more', 'edit', 'review', 'photo']) $(`#view-${v}`).hidden = v !== view;
   $('#title').textContent = TITLES[view];
   $('#btnBack').hidden = !state.sub;
   $('#tabbar').hidden = Boolean(state.sub);
-  $('#fabBar').hidden = Boolean(state.sub) || state.tab === 'more';
+  $('#fabBar').hidden = Boolean(state.sub) || state.tab === 'more' || state.tab === 'kirova';
   document.body.classList.toggle('sub', Boolean(state.sub));
   document.querySelectorAll('#tabbar button').forEach((b) => b.classList.toggle('active', b.dataset.tab === state.tab));
   if (view === 'month') renderMonth();
   if (view === 'history') renderHistory();
+  if (view === 'kirova') renderKirova();
   if (view === 'more') renderMore();
 }
 
@@ -586,8 +589,9 @@ async function onImport(file) {
 async function restoreData(data, from) {
   const info = db.validateBackup(data);
   const cur = state.records.size;
+  const kirova = info.kirova == null ? '' : ` Кирова, 40: ${plural(info.kirova, 'месяц', 'месяца', 'месяцев')}.`;
   const ok = await confirmDlg(`Восстановить из ${from}?`,
-    `Сейчас в приложении <b>${nRecords(cur)}</b>, в копии — <b>${nRecords(info.records)}</b> (${plural(info.apartments, 'квартира', 'квартиры', 'квартир')}). Текущие данные <b>заменятся</b> копией.<br><br>Если что-то пойдёт не так, их можно вернуть кнопкой «Вернуть данные до восстановления».`,
+    `Сейчас в приложении <b>${nRecords(cur)}</b>, в копии — <b>${nRecords(info.records)}</b> (${plural(info.apartments, 'квартира', 'квартиры', 'квартир')}).${kirova} Текущие данные <b>заменятся</b> копией.<br><br>Если что-то пойдёт не так, их можно вернуть кнопкой «Вернуть данные до восстановления».`,
     'Заменить данные', 'danger');
   if (!ok) return false;
   await db.importReplace(data);
@@ -713,7 +717,7 @@ async function onCloudOff() {
 // ---------- события ----------
 
 function bind() {
-  document.querySelectorAll('#tabbar button').forEach((b) => b.addEventListener('click', () => { state.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }));
+  document.querySelectorAll('#tabbar button').forEach((b) => b.addEventListener('click', async () => { await flushKirova(); state.tab = b.dataset.tab; render(); window.scrollTo(0, 0); }));
   $('#btnBack').addEventListener('click', leaveSub);
   document.querySelectorAll('[data-month-step]').forEach((b) => b.addEventListener('click', () => {
     state.period = shiftPeriod(state.period, Number(b.dataset.monthStep));
@@ -831,6 +835,7 @@ function showError(err) {
 async function init() {
   bind();
   try {
+    await initKirova({ initialPeriod: state.period, shiftPeriod, periodTitle, esc, toast, showError, dataChanged });
     await reload();
   } catch (err) {
     showError(new Error(`Не удалось открыть хранилище: ${err.message}`));

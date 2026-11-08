@@ -2,7 +2,7 @@
 import { SERVICE_KEYS, totalOf } from './money.js';
 
 const DB_NAME = 'kommunalka';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 export const DEFAULT_APARTMENTS = [
   { id: 'apt-76', number: '76', order: 1 },
   { id: 'apt-211', number: '211', order: 2 },
@@ -23,7 +23,8 @@ function open() {
         db.createObjectStore('meta', { keyPath: 'k' });
         for (const a of DEFAULT_APARTMENTS) apts.put(a);
       }
-      // Будущие миграции: if (e.oldVersion < 2) { … } — только добавление, без удаления данных.
+      if (e.oldVersion < 2) db.createObjectStore('kirova', { keyPath: 'period' });
+      // Будущие миграции: if (e.oldVersion < 3) { … } — только добавление, без удаления данных.
       void tx;
     };
     req.onsuccess = () => {
@@ -130,11 +131,36 @@ export function setMeta(k, v) {
   return run(['meta'], 'readwrite', (tx) => req2p(tx.objectStore('meta').put({ k, v })));
 }
 
+// ---------- Кирова, 40 (отдельный учёт, в итоги квартир не входит) ----------
+
+export const KIROVA_ROWS = [
+  { key: 'water', title: 'Вода и водоотведение' },
+  { key: 'heat', title: 'Отопление' },
+  { key: 'el', title: 'Электричество' },
+  { key: 'extra', title: '' },
+];
+const PERIOD_RE = /^\d{4}-\d{2}$/;
+
+export function validateKirova(r) {
+  if (!r || !PERIOD_RE.test(r.period) || typeof r.rows !== 'object' || r.rows === null) throw new Error('Файл повреждён: неверная запись «Кирова, 40».');
+  const rows = {};
+  for (const { key } of KIROVA_ROWS) {
+    const x = r.rows[key] || {};
+    const cents = x.cents ?? null;
+    if (cents !== null && !Number.isInteger(cents)) throw new Error('Файл повреждён: неверная сумма «Кирова, 40».');
+    rows[key] = { prev: String(x.prev ?? ''), cur: String(x.cur ?? ''), cents, ...(key === 'extra' ? { title: String(x.title ?? '') } : {}) };
+  }
+  return { period: r.period, rows, paid: Boolean(r.paid), paidAt: r.paid ? r.paidAt || null : null, updatedAt: r.updatedAt || new Date().toISOString() };
+}
+export const listKirova = () => run(['kirova'], 'readonly', (tx) => req2p(tx.objectStore('kirova').getAll()));
+export const putKirova = (rec) => run(['kirova'], 'readwrite', (tx) => req2p(tx.objectStore('kirova').put(validateKirova(rec))));
+export const deleteKirova = (period) => run(['kirova'], 'readwrite', (tx) => req2p(tx.objectStore('kirova').delete(period)));
+
 // ---------- резервная копия ----------
 
 export async function exportAll() {
-  const [apartments, records, accountMap] = await Promise.all([listApartments(), listRecords(), getMeta('accountMap')]);
-  return { app: 'kommunalka', format: 1, exportedAt: new Date().toISOString(), apartments, records, accountMap: accountMap || {} };
+  const [apartments, records, accountMap, kirova] = await Promise.all([listApartments(), listRecords(), getMeta('accountMap'), listKirova()]);
+  return { app: 'kommunalka', format: 1, exportedAt: new Date().toISOString(), apartments, records, accountMap: accountMap || {}, kirova };
 }
 
 export function validateBackup(data) {
@@ -150,14 +176,18 @@ export function validateBackup(data) {
     validateAmounts(r.amounts || {});
     if (r.key !== recordKey(r.aptId, r.period)) throw new Error('Файл повреждён: неверный ключ записи.');
   }
-  return { apartments: data.apartments.length, records: data.records.length };
+  if (data.kirova !== undefined) {
+    if (!Array.isArray(data.kirova)) throw new Error('Файл повреждён: неверный раздел «Кирова, 40».');
+    data.kirova.forEach(validateKirova);
+  }
+  return { apartments: data.apartments.length, records: data.records.length, kirova: data.kirova?.length ?? null };
 }
 
 /** Полная замена данных копией. Перед заменой текущие данные сохраняются в meta.beforeImport. */
 export async function importReplace(data) {
   validateBackup(data);
   const before = await exportAll();
-  await run(['apartments', 'records', 'meta'], 'readwrite', (tx) => {
+  await run(['apartments', 'records', 'meta', 'kirova'], 'readwrite', (tx) => {
     tx.objectStore('meta').put({ k: 'beforeImport', v: before });
     tx.objectStore('apartments').clear();
     tx.objectStore('records').clear();
@@ -167,5 +197,10 @@ export async function importReplace(data) {
       tx.objectStore('records').put({ ...r, amounts, total: totalOf(amounts) });
     }
     tx.objectStore('meta').put({ k: 'accountMap', v: data.accountMap || {} });
+    // В старых копиях раздела нет — тогда данные «Кирова, 40» на телефоне не трогаем.
+    if (Array.isArray(data.kirova)) {
+      tx.objectStore('kirova').clear();
+      for (const r of data.kirova) tx.objectStore('kirova').put(validateKirova(r));
+    }
   });
 }
