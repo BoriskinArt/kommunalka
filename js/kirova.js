@@ -4,6 +4,9 @@ import * as db from './db.js';
 import { formatAmount, formatRub, parseUserMoney } from './money.js';
 
 const ROWS = db.KIROVA_ROWS;
+// Отопление — только сумма вручную, без показаний. Электричество — расход с потерями 1 %.
+const MANUAL = new Set(['heat']);
+const LOSS = { el: 0.01 };
 let ctx;
 let period;
 let records = new Map();
@@ -20,14 +23,15 @@ const toNum = (s) => {
 const fmtNum = (n) => String(Math.round(n * 1000) / 1000).replace('.', ',');
 
 /** Расход и сумма по показаниям и тарифу. cents = null, если посчитать нельзя. */
-function calcRow(prev, cur, tariff) {
+function calcRow(prev, cur, tariff, loss = 0) {
   const a = toNum(prev);
   const b = toNum(cur);
   const t = toNum(tariff);
   if (a == null || b == null) return { use: null, cents: null };
   const use = b - a;
-  if (use < 0 || t == null) return { use, cents: null };
-  return { use, t, cents: Math.round(Number((use * t * 100).toFixed(4))) };
+  const billed = use * (1 + loss); // расход с учётом коэффициента потерь
+  if (use < 0 || t == null) return { use, billed, cents: null };
+  return { use, billed, t, cents: Math.round(Number((billed * t * 100).toFixed(4))) };
 }
 const fmtDate = (iso) => new Date(iso).toLocaleDateString('ru-RU');
 
@@ -92,10 +96,11 @@ function readForm() {
   let ok = true;
   for (const { key } of ROWS) {
     const money = $(`#k-${key}-cents`);
-    const prev = $(`#k-${key}-prev`).value.trim();
-    const cur = $(`#k-${key}-cur`).value.trim();
-    const tariff = $(`#k-${key}-tariff`).value.trim();
-    const calc = calcRow(prev, cur, tariff);
+    const val = (f) => $(`#k-${key}-${f}`)?.value.trim() ?? '';
+    const prev = val('prev');
+    const cur = val('cur');
+    const tariff = val('tariff');
+    const calc = MANUAL.has(key) ? { use: null, cents: null } : calcRow(prev, cur, tariff, LOSS[key]);
     // Есть показания и тариф — сумма считается сама, поле только для чтения.
     money.readOnly = calc.cents != null;
     money.classList.toggle('computed', calc.cents != null);
@@ -155,6 +160,15 @@ export function renderKirova() {
     const head = key === 'extra'
       ? `<input type="text" class="k-title" id="k-extra-title" placeholder="Своя строка" value="${ctx.esc(r?.title ?? prevRec?.rows.extra?.title ?? '')}" autocomplete="off">`
       : `<span class="svc-title">${title}</span>`;
+    if (MANUAL.has(key)) {
+      const last = prevRec?.rows[key]?.cents;
+      return `<div class="svc k-row">
+      <div class="svc-main">${head}
+        <label class="k-cur">Сумма, ₽<input class="money" id="k-${key}-cents" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${r?.cents == null ? '' : formatAmount(r.cents)}"></label>
+      </div>
+      <div class="prev-hint">${last == null ? 'В прошлом месяце: нет данных' : `В прошлом месяце: ${formatRub(last)}`}</div>
+    </div>`;
+    }
     // Главное поле — текущее показание: крупно, справа от названия. Сумма считается ниже.
     return `<div class="svc k-row">
       <div class="svc-main">${head}
@@ -181,13 +195,15 @@ function updateTotals() {
   $('#kTotal6').textContent = formatRub(gross);
   $('#kTax').textContent = total ? `Налог 6 %: ${formatRub(gross - total)}, после него останется ${formatRub(total)}` : '';
   for (const { key } of ROWS) {
-    const { use, t, cents } = rows[key].calc;
+    if (MANUAL.has(key)) continue;
+    const { use, billed, t, cents } = rows[key].calc;
     const el = $(`#k-${key}-use`);
+    const useText = LOSS[key] ? `${fmtNum(use)} + ${LOSS[key] * 100} % потерь = ${fmtNum(billed)}` : fmtNum(use);
     el.classList.toggle('bad-text', use != null && use < 0);
     el.textContent = use == null ? ''
       : use < 0 ? 'Текущее показание меньше предыдущего'
-      : cents != null ? `Расход ${fmtNum(use)} × ${fmtNum(t)} = ${formatRub(cents)}`
-      : `Расход ${fmtNum(use)}. Укажите тариф, и сумма посчитается сама`;
+      : cents != null ? `Расход ${useText} × ${fmtNum(t)} = ${formatRub(cents)}`
+      : `Расход ${useText}. Укажите тариф, и сумма посчитается сама`;
   }
 }
 
