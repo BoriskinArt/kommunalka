@@ -1,4 +1,4 @@
-// Кирова, 40 — отдельный учёт: ручной ввод показаний и сумм, итог и итог + 6 %, отметка об оплате.
+// Кирова, 40 — отдельный учёт: показания × тариф (или сумма вручную), итог с налогом 6 %, отметка об оплате.
 // Данные лежат в своём хранилище и в итоги квартир не входят. В облако уходят в той же копии.
 import * as db from './db.js';
 import { formatAmount, formatRub, parseUserMoney } from './money.js';
@@ -10,13 +10,25 @@ let records = new Map();
 let saveTimer = null;
 
 const $ = (s) => document.querySelector(s);
-const plus6 = (cents) => Math.round((cents * 106) / 100);
+// Сумма с налогом: из неё платится 6 %, и остаётся исходная сумма. gross − 6 % = total → gross = total / 0,94.
+const withTax = (cents) => Math.round((cents * 100) / 94);
 const totalOf = (rec) => ROWS.reduce((t, r) => t + (rec?.rows[r.key]?.cents ?? 0), 0);
 const toNum = (s) => {
   const t = String(s).replace(/[\s  ]/g, '').replace(',', '.');
   return /^\d+(\.\d+)?$/.test(t) ? Number(t) : null;
 };
 const fmtNum = (n) => String(Math.round(n * 1000) / 1000).replace('.', ',');
+
+/** Расход и сумма по показаниям и тарифу. cents = null, если посчитать нельзя. */
+function calcRow(prev, cur, tariff) {
+  const a = toNum(prev);
+  const b = toNum(cur);
+  const t = toNum(tariff);
+  if (a == null || b == null) return { use: null, cents: null };
+  const use = b - a;
+  if (use < 0 || t == null) return { use, cents: null };
+  return { use, t, cents: Math.round(Number((use * t * 100).toFixed(4))) };
+}
 const fmtDate = (iso) => new Date(iso).toLocaleDateString('ru-RU');
 
 export async function initKirova(helpers) {
@@ -80,12 +92,20 @@ function readForm() {
   let ok = true;
   for (const { key } of ROWS) {
     const money = $(`#k-${key}-cents`);
+    const prev = $(`#k-${key}-prev`).value.trim();
+    const cur = $(`#k-${key}-cur`).value.trim();
+    const tariff = $(`#k-${key}-tariff`).value.trim();
+    const calc = calcRow(prev, cur, tariff);
+    // Есть показания и тариф — сумма считается сама, поле только для чтения.
+    money.readOnly = calc.cents != null;
+    money.classList.toggle('computed', calc.cents != null);
+    if (calc.cents != null) money.value = formatAmount(calc.cents);
     const raw = money.value.trim();
-    const cents = raw === '' ? null : parseUserMoney(raw);
+    const cents = calc.cents ?? (raw === '' ? null : parseUserMoney(raw));
     const bad = raw !== '' && cents == null;
     money.classList.toggle('invalid', bad);
     if (bad) ok = false;
-    rows[key] = { prev: $(`#k-${key}-prev`).value.trim(), cur: $(`#k-${key}-cur`).value.trim(), cents: bad ? null : cents };
+    rows[key] = { prev, cur, tariff, cents: bad ? null : cents, calc };
     if (key === 'extra') rows[key].title = $('#k-extra-title').value.trim();
   }
   return { rows, ok };
@@ -131,15 +151,17 @@ export function renderKirova() {
   $('#kFields').innerHTML = ROWS.map(({ key, title }) => {
     const r = rec?.rows[key];
     const prev = r?.prev || prevRec?.rows[key]?.cur || '';
+    const tariff = r?.tariff || prevRec?.rows[key]?.tariff || '';
     const head = key === 'extra'
-      ? `<input type="text" class="k-title" id="k-extra-title" placeholder="Своя строка, например «Домофон»" value="${ctx.esc(r?.title ?? prevRec?.rows.extra?.title ?? '')}" autocomplete="off">`
+      ? `<input type="text" class="k-title" id="k-extra-title" placeholder="Своя строка" value="${ctx.esc(r?.title ?? prevRec?.rows.extra?.title ?? '')}" autocomplete="off">`
       : `<label class="svc-title" for="k-${key}-cents">${title}</label>`;
     return `<div class="svc k-row">
       <div class="svc-main">${head}
         <input class="money" id="k-${key}-cents" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${r?.cents == null ? '' : formatAmount(r.cents)}" aria-label="Сумма">
       </div>
       <div class="k-meter">
-        <label>Пред. показание<input class="meter" id="k-${key}-prev" inputmode="decimal" autocomplete="off" value="${ctx.esc(prev)}"></label>
+        <label>Тариф, ₽<input class="meter" id="k-${key}-tariff" inputmode="decimal" autocomplete="off" value="${ctx.esc(tariff)}"></label>
+        <label>Предыдущее<input class="meter" id="k-${key}-prev" inputmode="decimal" autocomplete="off" value="${ctx.esc(prev)}"></label>
         <label>Текущее<input class="meter" id="k-${key}-cur" inputmode="decimal" autocomplete="off" value="${ctx.esc(r?.cur ?? '')}"></label>
       </div>
       <div class="prev-hint" id="k-${key}-use"></div>
@@ -154,11 +176,17 @@ function updateTotals() {
   const { rows } = readForm();
   const total = ROWS.reduce((t, { key }) => t + (rows[key].cents ?? 0), 0);
   $('#kTotal').textContent = formatRub(total);
-  $('#kTotal6').textContent = formatRub(plus6(total));
+  const gross = withTax(total);
+  $('#kTotal6').textContent = formatRub(gross);
+  $('#kTax').textContent = total ? `Налог 6 %: ${formatRub(gross - total)}, после него останется ${formatRub(total)}` : '';
   for (const { key } of ROWS) {
-    const a = toNum(rows[key].prev);
-    const b = toNum(rows[key].cur);
-    $(`#k-${key}-use`).textContent = a != null && b != null ? `Расход: ${fmtNum(b - a)}` : '';
+    const { use, t, cents } = rows[key].calc;
+    const el = $(`#k-${key}-use`);
+    el.classList.toggle('bad-text', use != null && use < 0);
+    el.textContent = use == null ? ''
+      : use < 0 ? 'Текущее показание меньше предыдущего'
+      : cents != null ? `Расход ${fmtNum(use)} × ${fmtNum(t)} = ${formatRub(cents)}`
+      : `Расход ${fmtNum(use)}. Укажите тариф, и сумма посчитается сама`;
   }
 }
 
@@ -171,7 +199,7 @@ function renderMeta() {
   $('#kHist').innerHTML = list.length
     ? list.map((r) => `<button type="button" class="k-hist ${r.period === period ? 'current' : ''}" data-kperiod="${r.period}">
         <span>${ctx.periodTitle(r.period)}</span>
-        <span class="k-hist-sum">${formatRub(plus6(totalOf(r)))}</span>
+        <span class="k-hist-sum">${formatRub(withTax(totalOf(r)))}</span>
         <span class="badge ${r.paid ? '' : 'warn'}">${r.paid ? 'оплачено' : 'не оплачено'}</span>
       </button>`).join('')
     : '<p class="hint">Пока нет сохранённых месяцев. Введите суммы — они сохраняются сами.</p>';

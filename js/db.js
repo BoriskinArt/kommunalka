@@ -2,12 +2,11 @@
 import { SERVICE_KEYS, totalOf } from './money.js';
 
 const DB_NAME = 'kommunalka';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 export const DEFAULT_APARTMENTS = [
   { id: 'apt-76', number: '76', order: 1 },
   { id: 'apt-211', number: '211', order: 2 },
   { id: 'apt-231', number: '231', order: 3 },
-  { id: 'apt-5', number: '5', order: 4 },
 ];
 
 let dbp = null;
@@ -24,7 +23,12 @@ function open() {
         for (const a of DEFAULT_APARTMENTS) apts.put(a);
       }
       if (e.oldVersion < 2) db.createObjectStore('kirova', { keyPath: 'period' });
-      // Будущие миграции: if (e.oldVersion < 3) { … } — только добавление, без удаления данных.
+      if (e.oldVersion >= 1 && e.oldVersion < 3) {
+        // Кв. 5 убрана из списка: её учёт теперь на вкладке «Кирова 40». Удаляем, только если у неё нет записей.
+        const cnt = tx.objectStore('records').index('byApt').count('apt-5');
+        cnt.onsuccess = () => { if (cnt.result === 0) tx.objectStore('apartments').delete('apt-5'); };
+      }
+      // Будущие миграции: if (e.oldVersion < 4) { … } — без потери данных.
       void tx;
     };
     req.onsuccess = () => {
@@ -148,7 +152,7 @@ export function validateKirova(r) {
     const x = r.rows[key] || {};
     const cents = x.cents ?? null;
     if (cents !== null && !Number.isInteger(cents)) throw new Error('Файл повреждён: неверная сумма «Кирова, 40».');
-    rows[key] = { prev: String(x.prev ?? ''), cur: String(x.cur ?? ''), cents, ...(key === 'extra' ? { title: String(x.title ?? '') } : {}) };
+    rows[key] = { prev: String(x.prev ?? ''), cur: String(x.cur ?? ''), tariff: String(x.tariff ?? ''), cents, ...(key === 'extra' ? { title: String(x.title ?? '') } : {}) };
   }
   return { period: r.period, rows, paid: Boolean(r.paid), paidAt: r.paid ? r.paidAt || null : null, updatedAt: r.updatedAt || new Date().toISOString() };
 }
