@@ -181,7 +181,12 @@ a { color: var(--accent); }
 .k-row .svc-main { align-items: center; }
 .k-title { flex: 1; min-width: 0; font-size: 16px !important; }
 .k-meter { display: flex; gap: 6px; margin-top: 8px; }
-.money.computed { background: var(--accent-soft); border-color: transparent; }
+.k-cur { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.k-cur .money { font-size: 22px; width: 8.5em; min-height: 54px; border: 2px solid var(--accent); background: var(--card); }
+.k-meter .k-sum { flex: 1.35; }
+.k-sum input { text-align: right; font-weight: 700; }
+.meter.invalid { border-color: var(--bad); background: var(--bad-soft); }
+.meter.computed { background: var(--accent-soft); border-color: transparent; color: var(--ok); }
 #kTax { margin: 6px 0 0; }
 .k-meter label { flex: 1; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); font-weight: 600; min-width: 0; }
 .meter { font: inherit; font-size: 16px; padding: 8px 10px; min-height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); width: 100%; font-variant-numeric: tabular-nums; }

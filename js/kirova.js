@@ -60,7 +60,7 @@ function bind() {
     saveTimer = setTimeout(() => save().catch(ctx.showError), 700);
   });
   $('#kFields').addEventListener('change', (e) => {
-    if (e.target.classList.contains('money') && e.target.value.trim() !== '') {
+    if (e.target.id.endsWith('-cents') && e.target.value.trim() !== '') {
       const v = parseUserMoney(e.target.value);
       if (v != null) e.target.value = formatAmount(v);
     }
@@ -154,15 +154,16 @@ export function renderKirova() {
     const tariff = r?.tariff || prevRec?.rows[key]?.tariff || '';
     const head = key === 'extra'
       ? `<input type="text" class="k-title" id="k-extra-title" placeholder="Своя строка" value="${ctx.esc(r?.title ?? prevRec?.rows.extra?.title ?? '')}" autocomplete="off">`
-      : `<label class="svc-title" for="k-${key}-cents">${title}</label>`;
+      : `<span class="svc-title">${title}</span>`;
+    // Главное поле — текущее показание: крупно, справа от названия. Сумма считается ниже.
     return `<div class="svc k-row">
       <div class="svc-main">${head}
-        <input class="money" id="k-${key}-cents" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${r?.cents == null ? '' : formatAmount(r.cents)}" aria-label="Сумма">
+        <label class="k-cur">Текущее показание<input class="money" id="k-${key}-cur" inputmode="decimal" autocomplete="off" value="${ctx.esc(r?.cur ?? '')}"></label>
       </div>
       <div class="k-meter">
-        <label>Тариф, ₽<input class="meter" id="k-${key}-tariff" inputmode="decimal" autocomplete="off" value="${ctx.esc(tariff)}"></label>
         <label>Предыдущее<input class="meter" id="k-${key}-prev" inputmode="decimal" autocomplete="off" value="${ctx.esc(prev)}"></label>
-        <label>Текущее<input class="meter" id="k-${key}-cur" inputmode="decimal" autocomplete="off" value="${ctx.esc(r?.cur ?? '')}"></label>
+        <label>Тариф, ₽<input class="meter" id="k-${key}-tariff" inputmode="decimal" autocomplete="off" value="${ctx.esc(tariff)}"></label>
+        <label class="k-sum">Сумма, ₽<input class="meter" id="k-${key}-cents" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${r?.cents == null ? '' : formatAmount(r.cents)}"></label>
       </div>
       <div class="prev-hint" id="k-${key}-use"></div>
     </div>`;

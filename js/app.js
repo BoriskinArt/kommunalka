@@ -6,7 +6,7 @@ import { loadImage, PhotoEditor } from './photo.js';
 import * as cloud from './cloud.js';
 import { initKirova, renderKirova, reloadKirova, flush as flushKirova } from './kirova.js';
 
-export const APP_VERSION = '1.3.0';
+export const APP_VERSION = '1.3.1';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
